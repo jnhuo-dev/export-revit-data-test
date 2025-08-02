@@ -2,11 +2,15 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+
+using Newtonsoft.Json;
 
 namespace exportDB
 {
@@ -22,47 +26,86 @@ namespace exportDB
             Document doc = uiapp.ActiveUIDocument.Document;
 
             //Get all doors from project
-            FilteredElementCollector collector = new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance))
-                .OfCategory(BuiltInCategory.OST_Doors);
+            var door = new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance))
+                .OfCategory(BuiltInCategory.OST_Doors).FirstOrDefault();
 
-            Result result = ExportBatch(collector, ref message);
-
-            if (result == Result.Succeeded)
+            if (door == null)
             {
-                TaskDialog.Show("Door Data Export", "Door Data successfuly exported");
+                TaskDialog.Show("결과", "문이 없습니다.");
+                return Result.Succeeded;
             }
-            else
-            {
-                TaskDialog.Show("Door Data Export", "Something went wrong...");
-            }
+            TaskDialog.Show("결과", "Test");
+            // 정보 추출
+            string id = door.UniqueId;
+            string familyType = door.Name;
+            string mark = door.LookupParameter("Mark")?.AsString();
+            string finish = door.LookupParameter("DoorFinish")?.AsString();
 
-            return result;
+            // 서버로 전송
+            Task.Run(async () =>
+            {
+                await SendDoorDataToServer(id, familyType, mark, finish);
+            });
+
+            TaskDialog.Show("결과", "서버로 전송 시도 완료");
+            return Result.Succeeded;
         }
 
-        public static Result ExportBatch(FilteredElementCollector doors, ref string message)
+        private async Task SendDoorDataToServer(string id, string type, string mark, string finish)
         {
-            List<Door> doorData = new List<Door>();
-
-            HttpStatusCode statusCode;
-            string jsonResponse, errorMessage;
-            Result result = Result.Succeeded;
-
-            foreach (Element element in doors)
+            var doorData = new
             {
-                doorData.Add(new DoorData(element));
-            }
+                _id = id,
+                FamilyType = type,
+                Mark = mark,
+                DoorFinish = finish
+            };
 
-            //REST request to batch post door data
-            statusCode = DoorAPI.PostBatch(out jsonResponse, out errorMessage, "doors", doorData);
+            string json = JsonConvert.SerializeObject(doorData);
 
-            if ((int)statusCode == 0)
+            using (HttpClient client = new HttpClient())
             {
-                message = errorMessage;
-                result = Result.Failed;
+                try
+                {
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    var response = await client.PostAsync("http://localhost:4000/doors", content);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        TaskDialog.Show("오류", "서버 응답 실패: " + response.StatusCode);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    TaskDialog.Show("예외", ex.Message);
+                }
             }
-
-            return result;
-
         }
+
+        //public static Result ExportBatch(FilteredElementCollector doors, ref string message)
+        //{
+        //    List<Door> doorData = new List<Door>();
+
+        //    HttpStatusCode statusCode;
+        //    string jsonResponse, errorMessage;
+        //    Result result = Result.Succeeded;
+
+        //    foreach (Element element in doors)
+        //    {
+        //        doorData.Add(new DoorData(element));
+        //    }
+
+        //    //REST request to batch post door data
+        //    statusCode = DoorAPI.PostBatch(out jsonResponse, out errorMessage, "doors", doorData);
+
+        //    if ((int)statusCode == 0)
+        //    {
+        //        message = errorMessage;
+        //        result = Result.Failed;
+        //    }
+
+        //    return result;
+
+        //}
     }
 }
