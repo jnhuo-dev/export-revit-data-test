@@ -20,20 +20,26 @@ namespace exportDB
             UIDocument uidoc = uiApp.ActiveUIDocument;
             Document doc = uidoc.Document;
 
+            // 1. 서버에서 문 데이터 가져오기 (비동기 -> 동기 호출)
             var task = Task.Run(() => GetDoorsFromServer());
-            task.Wait(); // async → sync
+            task.Wait(); // async → sync(비동기 작업을 기다림)
             var doorDataList = task.Result;
 
             if (doorDataList == null)
                 return Result.Failed;
 
+            // 2. Revit 문 요소들 매칭해서 파라미터 업데이트
             using (Transaction tx = new Transaction(doc, "문 정보 업데이트"))
             {
                 tx.Start();
 
-                foreach (Element door in new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Doors).WhereElementIsNotElementType())
+                var collector = new FilteredElementCollector(doc)
+                                    .OfCategory(BuiltInCategory.OST_Doors)
+                                    .WhereElementIsNotElementType();
+
+                foreach (Element door in collector)
                 {
-                    var match = doorDataList.FirstOrDefault(d => d._id == door.UniqueId);
+                    var match = doorDataList.FirstOrDefault(d => d._id == door.Id.Value.ToString());
                     if (match != null)
                     {
                         door.LookupParameter("Mark")?.Set(match.Mark ?? "");
